@@ -1,18 +1,17 @@
 FROM alpine:3.19
 
 ENV DISPLAY=:0
-ENV VNC_PORT=5900
 ENV NOVNC_PORT=6080
 
-# --- ENABLE MAIN + COMMUNITY REPOSITORIES ---
+# Enable repos
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/main" > /etc/apk/repositories && \
     echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories
 
-# --- INSTALL VERIFIED PACKAGES ---
+# Install packages (VERIFIED)
 RUN apk update && apk add --no-cache \
     openbox \
-    tigervnc \
-    xauth \
+    x11vnc \
+    xvfb \
     novnc \
     websockify \
     badwolf \
@@ -21,16 +20,16 @@ RUN apk update && apk add --no-cache \
     bash \
     ca-certificates
 
-# --- CREATE USER ---
+# Create user
 RUN adduser -D user
 USER user
 WORKDIR /home/user
 
-# --- OPENBOX AUTOSTART (LAUNCH BROWSER) ---
+# Openbox autostart
 RUN mkdir -p ~/.config/openbox && \
     echo "badwolf &" > ~/.config/openbox/autostart
 
-# --- VNC XSTARTUP (SAFE) ---
+# xstartup
 RUN mkdir -p ~/.vnc && \
     cat << 'EOF' > ~/.vnc/xstartup
 #!/bin/sh
@@ -40,30 +39,29 @@ exec openbox-session &
 EOF
 RUN chmod +x ~/.vnc/xstartup
 
-# --- ENTRYPOINT (ALPINE-COMPATIBLE) ---
+# Entrypoint
 USER root
 RUN cat << 'EOF' > /entrypoint.sh
 #!/bin/sh
 set -e
 
-# Prepare VNC directory
+# Start virtual X display
+Xvfb :0 -screen 0 1280x720x24 &
+
+# VNC password
 mkdir -p /home/user/.vnc
-
-# Set VNC password from ENV
-echo "$VNC_PASSWORD" | vncpasswd -f > /home/user/.vnc/passwd
-chmod 600 /home/user/.vnc/passwd
-
-# VNC config (NO FLAGS ON ALPINE)
-cat << 'CFG' > /home/user/.vnc/config
-geometry=1280x720
-depth=24
-localhost=no
-CFG
-
+x11vnc -storepasswd "$VNC_PASSWORD" /home/user/.vnc/passwd
 chown -R user:user /home/user/.vnc
 
-# Start VNC server (flags NOT supported on Alpine)
-su user -c "vncserver :0"
+# Start desktop
+su user -c "DISPLAY=:0 ~/.vnc/xstartup &"
+
+# Start x11vnc (NO BLACKLISTING)
+x11vnc -display :0 \
+  -rfbauth /home/user/.vnc/passwd \
+  -forever \
+  -shared \
+  -nopw &
 
 # Start noVNC
 websockify --web=/usr/share/novnc/ 0.0.0.0:6080 localhost:5900
