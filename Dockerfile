@@ -2,12 +2,10 @@ FROM alpine:3.19
 
 ENV DISPLAY=:0
 ENV NOVNC_PORT=6080
+ENV VNC_PASSWORD=alpine  
 
-# Enable repos
-RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/main" > /etc/apk/repositories && \
-    echo "https://dl-cdn.alpinelinux.org/alpine/v3.19/community" >> /etc/apk/repositories
-
-# Install packages (VERIFIED)
+# 1. Install packages
+# Added: ttf-dejavu (REQUIRED for text rendering), adwaita-icon-theme (prevents gtk errors)
 RUN apk update && apk add --no-cache \
     openbox \
     x11vnc \
@@ -18,55 +16,65 @@ RUN apk update && apk add --no-cache \
     xterm \
     dbus \
     bash \
+    ttf-dejavu \
+    adwaita-icon-theme \
     ca-certificates
 
-# Create user
+# 2. Create user
 RUN adduser -D user
+
+# 3. User Configuration (Do this AS USER to fix permission issues)
 USER user
 WORKDIR /home/user
 
-# Openbox autostart
+# Configure Openbox to auto-start Badwolf
 RUN mkdir -p ~/.config/openbox && \
     echo "badwolf &" > ~/.config/openbox/autostart
 
-# xstartup
+# Configure Xstartup
 RUN mkdir -p ~/.vnc && \
     cat << 'EOF' > ~/.vnc/xstartup
 #!/bin/sh
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-exec openbox-session &
+# Use dbus-launch to ensure the browser can communicate with system bus
+exec dbus-launch --exit-with-session openbox-session &
 EOF
 RUN chmod +x ~/.vnc/xstartup
 
-# Entrypoint
+# 4. Entrypoint (Switch back to root for setup)
 USER root
 RUN cat << 'EOF' > /entrypoint.sh
 #!/bin/sh
 set -e
 
-# Start virtual X display
+echo "Starting Xvfb on $DISPLAY..."
 Xvfb :0 -screen 0 1280x720x24 &
+sleep 2
 
-# VNC password
+echo "Setting up VNC password..."
 mkdir -p /home/user/.vnc
 x11vnc -storepasswd "$VNC_PASSWORD" /home/user/.vnc/passwd
 chown -R user:user /home/user/.vnc
+chmod 600 /home/user/.vnc/passwd
 
-# Start desktop
-su user -c "DISPLAY=:0 ~/.vnc/xstartup &"
+echo "Starting Desktop Session..."
+su user -c "DISPLAY=:0 ~/.vnc/xstartup" &
 
-# Start x11vnc (NO BLACKLISTING)
+echo "Starting x11vnc..."
+# Removed -nopw to enforce password auth
 x11vnc -display :0 \
   -rfbauth /home/user/.vnc/passwd \
   -forever \
   -shared \
-  -nopw &
+  -bg
 
-# Start noVNC
+echo "Starting noVNC on port 6080..."
+# Using --web is critical for Alpine's package layout
 websockify --web=/usr/share/novnc/ 0.0.0.0:6080 localhost:5900
 EOF
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 6080
+
 CMD ["/entrypoint.sh"]
