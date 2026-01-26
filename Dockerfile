@@ -12,7 +12,6 @@ RUN apk add --no-cache \
     openbox \
     badwolf \
     novnc \
-    websockify \
     dbus \
     bash \
     ttf-dejavu
@@ -31,7 +30,7 @@ fi
 # Create VNC password
 x11vnc -storepasswd "$VNC_PASSWORD" /root/.vnc/passwd
 
-# Start virtual display
+# Start X server
 Xvfb :0 -screen 0 1280x720x24 &
 sleep 2
 
@@ -39,11 +38,11 @@ sleep 2
 openbox-session &
 sleep 2
 
-# Start browser (sandbox disabled)
+# Start browser (no sandbox)
 badwolf --no-sandbox https://www.instagram.com &
 sleep 2
 
-# Start VNC server (CORRECT FLAGS)
+# Start VNC server (RAW VNC ONLY)
 x11vnc \
   -display :0 \
   -rfbauth /root/.vnc/passwd \
@@ -52,10 +51,10 @@ x11vnc \
   -rfbport 5900 &
 sleep 2
 
-# Start noVNC
-websockify \
-  --web=/usr/share/novnc/ \
-  0.0.0.0:$NOVNC_PORT localhost:$VNC_PORT
+# Start noVNC proxy (CORRECT WAY)
+/usr/bin/novnc_proxy \
+  --vnc localhost:5900 \
+  --listen 0.0.0.0:6080
 EOF
 
 RUN chmod +x /start.sh
